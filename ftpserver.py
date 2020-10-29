@@ -14,10 +14,9 @@ PORT_MIN = 1024
 PORT_MAX = 65535
 
 
-def main(port):
+def main(host, port):
     '''main()
     The main processing loop of the FTP server.'''
-    myaddr = ('', port)
     # Test if platform supports IPv4/v6 dual connections.
     # if socket.has_dualstack_ipv6():
     #     sock = socket.create_server(
@@ -26,22 +25,22 @@ def main(port):
     #     sock = socket.create_server(myaddr)
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        logger.write_log('', 'Server binding to address {}.'.format(myaddr))
-        sock.bind(myaddr)
+        logger.write_log('Server binding to address {}:{}.'.format(host, port))
+        sock.bind((host, port))
 
-        logger.write_log('', 'Server listening on port {}.'.format(port))
+        logger.write_log('Server listening on port {}.'.format(port))
         sock.listen()
 
         conn, addr = sock.accept()
         with conn:
-            logger.write_log(addr, 'Connected to new client.')
+            logger.write_log('Connected to new client.', addr)
             while True:
                 data = conn.recv(1024)
                 if not data:
                     break
-                logger.write_log(addr, 'Got: ' + data.decode())
+                logger.write_log('Got: ' + data.decode(), addr)
                 conn.sendall(data)
-                logger.write_log(addr, 'Sent: ' + data.decode())
+                logger.write_log('Sent: ' + data.decode(), addr)
 
 
 if __name__ == '__main__':
@@ -51,4 +50,4 @@ if __name__ == '__main__':
         System.exit_('port number must be between {} and {}'.format(
             PORT_MIN, PORT_MAX))
     logger = Logger(filename)
-    main(port)
+    main('', port)

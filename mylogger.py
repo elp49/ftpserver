@@ -23,13 +23,17 @@ class Logger:
         current datetime."""
         return datetime.datetime.now().strftime('%x %X.%f')
 
-    def write_log(self, client_id, description):
+    def write_log(self, description, client_id=None):
         """write_log(client_id, description)
         Logs server activity in the following format: 
-        [TIMESTAMP] [CLIENT_ID] [ACTIVITY_DESCRIPTION]
+        [TIMESTAMP] [CLIENT_ADDR]:[PORT] [ACTIVITY_DESCRIPTION]
         If the filename has been lost then prints to the console."""
-        # Append line separator, datetime, and log string to line.
-        line = self.timestamp() + ' ' + client_id + description + LINE_SEP
+        if client_id is not None:
+            client_addr, port = client_id
+            # Append line separator, datetime, and log string to line.
+            line = '{} {}:{} {}{}'.format(self.timestamp(), client_addr, port, description, LINE_SEP)
+        else:
+            line = self.timestamp() + ' ' + description + LINE_SEP
 
         # Test if filename is defined.
         if self.filename is not None and len(self.filename) > 0:
