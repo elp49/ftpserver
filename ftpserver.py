@@ -17,28 +17,31 @@ PORT_MAX = 65535
 def main(port):
     '''main()
     The main processing loop of the FTP server.'''
+    myaddr = ('', port)
     # Test if platform supports IPv4/v6 dual connections.
-    if socket.has_dualstack_ipv6():
-        sock = socket.create_server(
-            ('', port), family=socket.AF_INET6, dualstack_ipv6=True)
-    else:
-        sock = socket.create_server(('', port))
+    # if socket.has_dualstack_ipv6():
+    #     sock = socket.create_server(
+    #         myaddr, family=socket.AF_INET6, dualstack_ipv6=True)
+    # else:
+    #     sock = socket.create_server(myaddr)
 
-    # sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # sock.bind((socket.gethostname(), port))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        logger.write_log('', 'Server binding to address {}.'.format(myaddr))
+        sock.bind(myaddr)
 
-    logger.write_log('', 'Server listening on port {}.'.format(port))
-    sock.listen()
-    conn, addr = sock.accept()
+        logger.write_log('', 'Server listening on port {}.'.format(port))
+        sock.listen()
 
-    logger.write_log(addr, 'Connected to new client.')
-    while True:
-        data = conn.recv(1024)
-        if not data:
-            break
-        logger.write_log(addr, 'Got: ' + data.decode())
-        conn.sendall(data)
-        logger.write_log(addr, 'Sent: ' + data.decode())
+        conn, addr = sock.accept()
+        with conn:
+            logger.write_log(addr, 'Connected to new client.')
+            while True:
+                data = conn.recv(1024)
+                if not data:
+                    break
+                logger.write_log(addr, 'Got: ' + data.decode())
+                conn.sendall(data)
+                logger.write_log(addr, 'Sent: ' + data.decode())
 
 
 if __name__ == '__main__':
