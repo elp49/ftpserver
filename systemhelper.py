@@ -9,12 +9,15 @@
 
 import sys
 
+PORT_MIN = 1024
+PORT_MAX = 65535
+
 
 class System:
 
     @staticmethod
-    def get_ftp_args():
-        '''get_ftp_args()
+    def args():
+        '''args()
         Handles potential errors with the FTP server command line arguments. If
         errors exist then the program exits. Otherwise, returns an array of the
         FTP server arguments in this format: [FILENAME, PORT].'''
@@ -34,6 +37,11 @@ class System:
         except ValueError:
             System.exit_(
                 'port number argument must be a positive integer', True)
+
+        # Test if port is out of range.
+        if port < PORT_MIN or port > PORT_MAX:
+            System.exit_(
+                f'port number must be between {PORT_MIN} and {PORT_MAX}')
 
         return [sys.argv[1], port]
 
@@ -96,9 +104,9 @@ class System:
         Prints the error message passed to it by msg to the console and then
         exits. If the optional argument is_arg_err is passed as True then the
         correct usage of the program is also displayed before exiting.'''
-        print('Error: ' + msg)
+        print(f'Error: {msg}')
 
         if is_arg_err:
-            print('Usage: ' + sys.argv[0] + ' [FILENAME] [PORT]')
+            print(f'Usage: {sys.argv[0]} [FILENAME] [PORT]')
 
         exit('exiting...')

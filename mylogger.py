@@ -19,8 +19,7 @@ class Logger:
 
     def timestamp(self):
         """timestamp()
-        Uses the datetime library to return a custom formatted string of the
-        current datetime."""
+        Uses the datetime library to return a custom formatted timestamp."""
         return datetime.datetime.now().strftime('%x %X.%f')
 
     def write_log(self, description, client_id=None):
@@ -28,12 +27,12 @@ class Logger:
         Logs server activity in the following format: 
         [TIMESTAMP] [CLIENT_ADDR]:[PORT] [ACTIVITY_DESCRIPTION]
         If the filename has been lost then prints to the console."""
-        if client_id is not None:
+        if client_id is not None and len(client_id) > 1:
             client_addr, port = client_id
             # Append line separator, datetime, and log string to line.
-            line = '{} {}:{} {}{}'.format(self.timestamp(), client_addr, port, description, LINE_SEP)
+            line = f'{self.timestamp()} {client_addr}:{port} {description}{LINE_SEP}'
         else:
-            line = self.timestamp() + ' ' + description + LINE_SEP
+            line = f'{self.timestamp()} {description} {LINE_SEP}'
 
         # Test if filename is defined.
         if self.filename is not None and len(self.filename) > 0:
@@ -43,7 +42,7 @@ class Logger:
                     log_file.write(line)
 
             except Exception as err:
-                print('There was an error while writing to the log file {}: {}'.format(
-                    self.filename, err))
+                print(
+                    f'There was an error while writing to the log file {self.filename}: {err}')
         else:
             print(line)
