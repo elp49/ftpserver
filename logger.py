@@ -11,21 +11,20 @@ LINE_SEP = '\n'
 
 
 class Logger:
-    """Logger
-    The Logger helper class. Used to write logs to a file."""
+    '''Logger
+    The Logger helper class. Used to write logs to a file.'''
 
     def __init__(self, filename):
         self.filename = filename
 
     def timestamp(self):
-        """timestamp()
-        Uses the datetime library to return a custom formatted timestamp."""
+        '''timestamp() - > formatted timestamp.'''
         return datetime.datetime.now().strftime('%x %X.%f')
 
-    def write_log(self, description):
-        """write_log(description)
-        Write server activity to log file. If the filename has been lost then
-        prints to the console."""
+    def write(self, description):
+        '''write(description)
+        Write to log file. If the log file's filename has been lost then print
+        to the console.'''
             
         line = f'{self.timestamp()} {description}{LINE_SEP}'
 
