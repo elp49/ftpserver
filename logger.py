@@ -1,6 +1,6 @@
 # CS472 - Homework #3
 # Edward Parrish
-# mylogger.py
+# logger.py
 #
 # This module is the logger module of the FTP server. It contains a Logger class
 # that is used by the major module to handle logging.
@@ -22,27 +22,22 @@ class Logger:
         Uses the datetime library to return a custom formatted timestamp."""
         return datetime.datetime.now().strftime('%x %X.%f')
 
-    def write_log(self, description, client_id=None):
-        """write_log(client_id, description)
-        Logs server activity in the following format: 
-        [TIMESTAMP] [CLIENT_ADDR]:[PORT] [ACTIVITY_DESCRIPTION]
-        If the filename has been lost then prints to the console."""
-        if client_id is not None and len(client_id) > 1:
-            client_addr, port = client_id
-            # Append line separator, datetime, and log string to line.
-            line = f'{self.timestamp()} {client_addr}:{port} {description}{LINE_SEP}'
-        else:
-            line = f'{self.timestamp()} {description} {LINE_SEP}'
+    def write_log(self, description):
+        """write_log(description)
+        Write server activity to log file. If the filename has been lost then
+        prints to the console."""
+            
+        line = f'{self.timestamp()} {description}{LINE_SEP}'
 
         # Test if filename is defined.
-        if self.filename is not None and len(self.filename) > 0:
+        if self.filename:
             try:
                 with open(self.filename, 'a') as log_file:
                     # Append the line to log file.
                     log_file.write(line)
 
             except Exception as err:
-                print(
-                    f'There was an error while writing to the log file {self.filename}: {err}')
+                print(f'Error writing to log file {self.filename}: {err}')
+                print(line)
         else:
             print(line)
