@@ -8,6 +8,8 @@
 
 import sys
 import os
+import stat
+import random
 
 
 class System:
@@ -15,14 +17,12 @@ class System:
     This class provides the FTP server with common system helper functions.'''
 
     @staticmethod
-    def args():
+    def args(port_min, port_max):
         '''args() -> (filename, port number)
         Retrieve the command line arguments for the FTP server. Handles
         potential errors with the FTP server command line arguments. If errors
         exist then the program exits.'''
 
-        PORT_MIN = 1024
-        PORT_MAX = 65535
         num_args = len(sys.argv)
 
         # Test if no log filename give.
@@ -40,8 +40,8 @@ class System:
             System.exit('port number must be a positive integer', True)
 
         # Test if port is out of range.
-        if port < PORT_MIN or port > PORT_MAX:
-            System.exit(f'port number must be between {PORT_MIN} & {PORT_MAX}')
+        if port < port_min or port > port_max:
+            System.exit(f'port number must be between {port_min} & {port_max}')
 
         return (sys.argv[1], port)
 
@@ -65,6 +65,26 @@ class System:
 
         return user == 'cs472' and pswd == 'hw2ftp'
 
+    DEFAULT_ENCODING = 'ISO-8859-1'
+
+    @staticmethod
+    def encode(data, encoding='utf-8'):
+        try:
+            return data.encode(encoding)
+        except UnicodeEncodeError:
+            return data.encode(System.DEFAULT_ENCODING)
+
+    @staticmethod
+    def decode(data, encoding='utf-8'):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            return data.decode(System.DEFAULT_ENCODING)
+
+    @staticmethod
+    def randint(a, b):
+        return random.randint(a, b)
+
 
 class File:
     '''File
@@ -77,8 +97,15 @@ class File:
         it. If a file is in its place, append underscore(s) to filename and
         create directory in its place.'''
 
+        CUR_DIR = os.path.abspath('.')
+        HOME = File.realpath(CUR_DIR, './home')
+
+        # Test if home dir does not exist.
+        if not os.path.exists(HOME):
+            os.mkdir(HOME)
+            
         # Get absolute path to user directory.
-        path = os.path.join(os.path.abspath('.'), 'home', user)
+        path = File.realpath(HOME, user)
 
         # Test if does not path exist.
         if not os.path.exists(path):
@@ -122,6 +149,13 @@ class File:
         return os.path.split(path)[0]
 
     @staticmethod
+    def isfile(path):
+        '''isfile(path) -> boolean
+        Determine if the path is a file.'''
+
+        return os.path.isfile(path)
+
+    @staticmethod
     def isdir(path):
         '''isdir(path) -> boolean
         Determine if the path is a directory.'''
@@ -134,6 +168,21 @@ class File:
         Determine if the path is readable.'''
 
         return os.access(path, os.R_OK)
+
+    @staticmethod
+    def listdir(path):
+        # Open pipe to acces command line stream.
+        stream = os.popen(f'ls -Al {path}')
+
+        # Read command lines output.
+        listing = stream.readlines()
+
+        # Remove line breaks.
+        for i in range(len(listing)):
+            listing[i] = listing[i].rstrip()
+
+        return '\r\n'.join(listing)
+
 
     # def cd(self, path):
     #     '''cd(path) -> error message
