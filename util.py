@@ -149,6 +149,13 @@ class File:
         return os.path.split(path)[0]
 
     @staticmethod
+    def exists(path):
+        '''exists(path) -> boolean
+        Determine if the path exists.'''
+
+        return os.path.exists(path)
+
+    @staticmethod
     def isfile(path):
         '''isfile(path) -> boolean
         Determine if the path is a file.'''
@@ -164,10 +171,25 @@ class File:
 
     @staticmethod
     def isreadable(path):
-        '''parent(path) -> boolean
+        '''isreadable(path) -> boolean
         Determine if the path is readable.'''
 
         return os.access(path, os.R_OK)
+
+    @staticmethod
+    def iswritable(path):
+        '''iswritable(path) -> boolean
+        Determine if the path is writable.'''
+
+        return os.access(path, os.W_OK)
+
+    @staticmethod
+    def can_write_file(path):
+        '''can_write_file(path) -> boolean
+        Determine if the user can write a file to a path.'''
+
+        parent = File.parent(path)
+        return File.iswritable(parent)
 
     @staticmethod
     def listdir(path):
@@ -181,21 +203,8 @@ class File:
         for i in range(len(listing)):
             listing[i] = listing[i].rstrip()
 
-        return '\r\n'.join(listing)
+        return '\n'.join(listing)
 
-
-    # def cd(self, path):
-    #     '''cd(path) -> error message
-    #     Attempt to change the current working directory to path. Return an error
-    #     message if unsuccessful.'''
-
-    #     # Test if path is directory.
-    #     if os.path.isdir(path):
-    #         self._dir = path
-
-    #     # Test if path exists.
-    #     elif os.path.exists(path):
-    #         return 'Not a directory.'
-
-    #     else:
-    #         return 'No such file or directory'
+    @staticmethod
+    def get_file_size(path):
+        return os.path.getsize(path)
