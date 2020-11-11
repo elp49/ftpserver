@@ -14,9 +14,11 @@ import socket
 import threading
 
 global server
-HOST = '0.0.0.0'
 PORT_MIN = 1024
 PORT_MAX = 65535
+IPv4 = '1'
+IPv6 = '2'
+NET_PRTS = [IPv4, IPv6]
 
 
 def log(description, client=None):
@@ -56,11 +58,11 @@ class Server:
         # fam, has_ds = self.server_params()
 
         # Create socket that will listen for client connections.
-        # with socket.create_server((HOST, self.port), family=fam, dualstack_ipv6=has_ds) as sock:
+        # with socket.create_server(('', self.port), family=fam, dualstack_ipv6=has_ds) as sock:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             # Bind socket.
-            sock.bind((HOST, port))
-            log(f'Binding to address: {HOST}:{self.port}.')
+            sock.bind(('', port))
+            log(f'Binding to address: localhost:{self.port}.')
 
             sock.listen()
             while True:
@@ -85,19 +87,17 @@ class Server:
                     break
 
     def server_params(self):
-        '''server_params() -> (family, has dualstack IPv6)
-        Determine if the platform supports dualstack IPv6. If it does then the
-        Server family should be AF_INET6, otherwise AF_INET.'''
+        '''server_params() -> (address family, boolean)
+        Determine if the platform supports dualstack IPv6. If it does, then set
+        server address family to be AF_INET6; otherwise set it to AF_INET.'''
 
-        if socket.has_dualstack_ipv6():
-            family = socket.AF_INET6
-            has_ds = True
-
+        has_ds = socket.has_dualstack_ipv6()
+        if has_ds:
+            addr_fam = socket.AF_INET6
         else:
-            family = socket.AF_INET
-            has_ds = False
+            addr_fam = socket.AF_INET
 
-        return family, has_ds
+        return addr_fam, has_ds
 
     def close_all(self, client, conn, addr):
         '''close_all(client, conn)
@@ -147,7 +147,7 @@ class Server:
                 client.sendall()
 
                 # Receive decoded client response.
-                data = client.recv()
+                data = client.recvall()
 
                 # Test if user closed connection.
                 if not data:
@@ -161,7 +161,8 @@ class Server:
                 client.update(command, value)
 
         # Remove connection from list of open connections.
-        self.open_connections.remove(client)
+        client.close()
+        remove_connection(client)
 
     def parse_response(self, response):
         '''parse(response) -> (command, value)
@@ -194,6 +195,12 @@ class Server:
         return command, value
 
 
+LIST = 'LIST'
+RETR = 'RETR'
+STOR = 'STOR'
+DATA_COMMANDS = [LIST, RETR, STOR]
+
+
 class Connection:
 
     def __init__(self, conn, addr):
@@ -222,8 +229,24 @@ class Connection:
         self.conn.sendall(util.System.encode(msg))
         log(f'Sent: {msg}', self)
 
-    def recv(self, bufsize=4096):
-        return util.System.decode(self.conn.recv(bufsize))
+    # def recv(self, bufsize=4096):
+    #     return util.System.decode(self.conn.recv(bufsize))
+
+    def recvall(self, bufsize=4096):
+        '''recvall(bufsize=4096) -> response data
+        Receive, decode, and return all response data over control connection.'''
+
+        data = b''
+        while True:
+            # Receive some data.
+            res = self.conn.recv(bufsize)
+            data += res
+
+            # Test if end of message.
+            if len(res) < bufsize:
+                break
+
+        return util.System.decode(data)
 
     def close(self):
         '''close()
@@ -232,18 +255,26 @@ class Connection:
         # TODO: can you send the 426 though data conneciton if its not been accepted yet?
         # Test if data connection open.
         if self.data_conn:
-            self.data_conn.close()
-            self.state.set_reply('426', 'Connection closed; transfer aborted.')
-            self.sendall()
+            try:
+                self.data_conn.close()
+                self.state.set_reply(
+                    '426', 'Connection closed; transfer aborted.')
+                self.sendall()
+            except:
+                pass
 
         self.state.set_reply(
             '421', 'Service not available, closing control connection.')
         self.sendall()
 
+        # Remove connection from list of open connections.
+        remove_connection(self)
+
     def update(self, command, value):
         '''update(command, value)
         Performs the client's command.'''
 
+        print(f'update({command}, {value})')
         # Test if user not logged in.
         if not self.is_logged_in:
             self.login(command, value)
@@ -251,29 +282,53 @@ class Connection:
         else:
             if command == 'CWD':
                 self.cwd(value)
-
             elif command == 'CDUP':
                 self.cdup()
-
             elif command == 'PWD':
                 self.pwd()
-
-            elif command == 'LIST':
-                self.ls(value)
-
             elif command == 'PASV':
                 self.pasv()
-
-            # elif command == 'PORT':
-
-            # elif command == 'RETR':
-
-            # elif command == 'STOR':
-
-            # elif command == 'QUIT':
-
+            elif command == 'EPSV':
+                self.epsv(value)
+            elif command == 'PORT':
+                self.port_cmd(value)
+            elif command == 'EPRT':
+                self.eprt(value)
             elif command == 'REIN':
                 self.initialize()
+            elif command == 'QUIT':
+                self.close()
+
+            else:
+                # Test if command not supported.
+                if command not in DATA_COMMANDS:
+                    self.state.set_reply('500', 'Unknown command.')
+
+                # Test if data connection was not created.
+                elif not self.data_conn:
+                    self.state.set_reply('425', 'Use PORT or PASV first.')
+
+                else:
+                    # Test if Active Mode.
+                    if self.data_conn.is_active_mode:
+                        # Connect data connection to client.
+                        self.data_conn.connect()
+
+                    # Test if Passive Mode.
+                    else:
+                        # Wait for client to connect to data connection.
+                        self.data_conn.connected.wait()
+
+                    if command == LIST:
+                        self.ls(value)
+                    elif command == RETR:
+                        self.retr(value)
+                    elif command == STOR:
+                        self.stor(value)
+
+                    # Cleanup data connection.
+                    self.data_conn.close()
+                    self.data_conn = None
 
     def login(self, command, value):
         '''login(command, value)
@@ -284,7 +339,7 @@ class Connection:
             if command == 'USER':
                 # Set username.
                 self.user = value
-                self.state.set_reply('331', 'Please specify password.')
+                self.state.set_reply('331', 'Please specify the password.')
 
             elif command == 'PASS':
                 self.state.set_reply('503', 'Login with USER first.')
@@ -346,48 +401,75 @@ class Connection:
         List the files at the provided path or in the current working directory
         if no path.'''
 
-        # Test if PORT of PASV active.
-        if self.data_conn:
-            # Wait for client to connect to data connection.
-            while not self.data_conn.connected:
-                continue
+        # Test if a path was given.
+        if path:
+            # Get realpath (absolute path).
+            realpath = util.File.realpath(self._dir, path)
+        else:
+            realpath = self._dir
 
-            #TODO: move file logic to file class.
-            # Test if a path was given.
-            if path:
-                # Get realpath (absolute path).
-                real = util.File.realpath(self._dir, path)
+        # Test if realpath does not exist or is not readable.
+        if not util.File.exists(realpath) or not util.File.isreadable(realpath):
+            self.state.set_reply(
+                '226', 'Transfer done (but failed to open directory).')
 
-                # Test if realpath is not readable.
-                if util.File.isdir(real) and not util.File.isreadable(real):
-                    self.state.set_reply(
-                        '550', 'Directory read access restricted.')
-                    return
-
-            else:
-                real = self._dir
-                
+        else:
             self.state.set_reply('150', 'Here comes the directory listing.')
             self.sendall()
 
             # Send LIST data.
-            self.data_conn.ls(real)
+            self.data_conn.ls(realpath)
             self.state.set_reply('226', 'Directory send OK.')
 
-            # Clear data connection.
-            self.data_conn = None
+    def stor(self, value):
+        '''stor(value)
+        Store a file that the client will send over data channel.'''
 
+        # Get the absolute path.
+        path = util.File.realpath(self._dir, value)
+
+        # Test if path not accessible.
+        if not value or not util.File.can_write_file(path):
+            self.state.set_reply('553', 'Could not create file.')
 
         else:
-            self.state.set_reply('425', 'Use PORT or PASV first.')
+            # Retrieve file from client and store it in file system.
+            self.state.set_reply('150', 'Ok to send data.')
+            self.sendall()
+
+            self.data_conn.stor(path)
+            self.state.set_reply('226', 'Transfer complete.')
+
+    def retr(self, value):
+        '''retr(value)
+        Send a file to the client over data channel.'''
+
+        # Get the absolute path.
+        path = util.File.realpath(self._dir, value)
+
+        # Test if file does not exists or is not readable.
+        if not util.File.isfile(path) or not util.File.isreadable(path):
+            self.state.set_reply('550', 'Failed to open file.')
+
+        else:
+            # Get file size.
+            nbytes = util.File.get_file_size(path)
+
+            # Send file to client.
+            self.state.set_reply(
+                '150', f'Opening data connection for {value} ({nbytes} bytes).')
+            self.sendall()
+
+            self.data_conn.retr(path)
+            self.state.set_reply('226', 'Transfer complete.')
 
     def pasv(self):
         '''pasv()
-        Enter passive mode.'''
+        Enter Passive Mode.'''
 
         # Open a data connection and retrieve port number.
         log(f'Opening Passive Mode data connection.', self)
-        port = self.open_data_conn()
+        port = self.open_passive_conn()
 
         # Convert port number into p1 and p2: port = (p1 * 256) + p2
         p1, p2 = self.convert_port_to_p1p2(port)
@@ -398,119 +480,343 @@ class Connection:
         # Set Passive Mode reply.
         self.state.set_reply('227', f'Entering Passive Mode ({h},{p1},{p2})')
 
+    def epsv(self, net_prt):
+        '''epsv(net_prt)
+        Enter Extended Passive Mode.'''
+
+        # Test if network protocol is bad.
+        if net_prt and net_prt not in NET_PRTS:
+            self.state.set_reply('522', 'Bad network protocol.')
+
+        else:
+            # Open a data connection and retrieve port number.
+            log(f'Opening Extended Passive Mode data connection.', self)
+            port = self.open_passive_conn(net_prt)
+
+            # Set Extended Passive Mode reply.
+            self.state.set_reply(
+                '229', f'Entering Extended Passive Mode (|||{port}|)')
+
+    def port_cmd(self, value):
+        '''port_cmd(value)
+        Enter Port Mode: Parse'''
+
+        # Test if PORT command is bad.
+        try:
+            host, port = self.port_ok(value)
+        except ValueError:
+            return
+
+        self.state.set_reply(
+            '200', 'PORT command successful. Consider using PASV.')
+
+        # Initialize a new data connection object.
+        self.initialize_data_conn(addr=(host, port), is_active_mode=True)
+
+    def port_ok(self, value):
+        '''port_ok(value) -> (host address, port number)
+        Parse a PORT command and perform various checks on it to determine if 
+        it's OK. If command is OK, then return a tuple of the parsed values;
+        otherwise set the reply code and message and raise ValueError.'''
+
+        DELIMETER = ','
+        a = value.split(DELIMETER)
+        n = len(a)
+
+        # Test if number of delimeters is incorrect.
+        if n != 6:
+            self.state.set_reply('500', 'Bad PORT command.')
+            raise ValueError
+
+        # Test if each PORT command argument is positive integer.
+        try:
+            for i in range(len(a)):
+                pos = self.get_port_position(i)
+                if int(a[i]) < 0:
+                    raise ValueError
+        except ValueError as err:
+            self.state.set_reply('500', f'Bad PORT command at position {pos}.')
+            raise err
+
+        # Convert PORT command arguments into host and port.
+        host = '.'.join(a[:4])
+        port = self.convert_p1p2_to_port(a[4], a[5])
+
+        return host, port
+
+    def get_port_position(self, i):
+        if i == 0:
+            return 'h1'
+        elif i == 1:
+            return 'h2'
+        elif i == 2:
+            return 'h3'
+        elif i == 3:
+            return 'h4'
+        elif i == 4:
+            return 'p1'
+        elif i == 5:
+            return 'p2'
+
+    def eprt(self, value):
+        '''eptr(value)
+        Enter Extended Port Mode.'''
+
+        # Test if EPTR command is bad.
+        try:
+            net_prt, host, port = self.eptr_ok(value)
+        except ValueError:
+            return
+
+        self.state.set_reply('200', 'EPRT command successful.')
+
+        # Initialize a new data connection object.
+        self.initialize_data_conn(
+            addr=(host, port), net_prt=net_prt, is_active_mode=True)
+
+    def eptr_ok(self, value):
+        '''eptr_ok(value) -> (network protocol, host address, port number)
+        Parse an EPTR command and perform various checks on it to determine if
+        it's OK. If command is OK, then return a tuple of the parsed values;
+        otherwise set the reply code and message and raise ValueError.'''
+
+        DELIMETER = '|'
+        a = value.split(DELIMETER)
+        n = len(a)
+
+        # Test if number of delimeters is incorrect.
+        if n != 5:
+            self.state.set_reply('500', 'Bad EPRT command.')
+            raise ValueError
+
+        # Test if network protocol unrecognized.
+        net_prt = a[1]
+        if net_prt not in NET_PRTS:
+            self.state.set_reply('522', 'Bad network protocol.')
+            raise ValueError
+
+        # Test if host address not in format: X.X.X.X
+        host = a[2]
+        if len(host.split('.')) != 4:
+            self.state.set_reply(
+                '522', 'Bad EPRT command; Bad host address.')
+            raise ValueError
+
+        # Test if port number out of bounds.
+        try:
+            port = int(a[3])
+            if port < 1:
+                raise ValueError
+        except ValueError as err:
+            self.state.set_reply(
+                '522', 'Bad EPRT command; Port number not positive integer.')
+            raise err
+        if port < PORT_MIN or port > PORT_MAX:
+            self.state.set_reply(
+                '522', f'Bad EPRT command; Port number should be in range {PORT_MIN} - {PORT_MAX}.')
+            raise ValueError
+
+        return net_prt, host, port
+
+    def determine_addr_fam(self, net_prt=None):
+        '''determine_addr_fam(net_prt=None) -> address family
+        Determine the address family depending on a given network protcol value
+        or the address family user by client connection'''
+
+        # Test if network protocol specified.
+        if net_prt:
+            # Test if network protocol is IPv6
+            if net_prt == IPv6:
+                return socket.AF_INET6
+
+            else:
+                return socket.AF_INET
+
+        # Return address family used by client connection.
+        return self.conn.family
+
     def convert_port_to_p1p2(self, port):
         '''convert_port_to_p1p2(port) -> (p1, p2)
         Convert a given port number into p1 and p2.'''
 
-        p1 = port // 256
-        p2 = port - (p1 * 256)
+        p1 = int(port) // 256
+        p2 = int(port) - (p1 * 256)
         return p1, p2
 
-    def open_data_conn(self):
-        '''open_data_conn() -> port number
-        Find an open port number on this machine, create a data connection, and
-        bind it to the port number.'''
+    def convert_p1p2_to_port(self, p1, p2):
+        '''convert_p1p2_to_port(p1, p2) -> port
+        Convert a given p1 and p2 into a port number.'''
+
+        return (int(p1) * 256) + int(p2)
+
+    def open_passive_conn(self, net_prt=None):
+        '''open_passive_conn(net_prt=None) -> port number
+        Open a Passive Connection. Find an open port number on this machine,
+        create a data connection, and bind it to the port number.'''
 
         low = 50000
         high = 60000
 
-        # Initialize data connection.
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.initialize_data_conn()
 
         # Loop until found an open port.
-        port_open = False
-        while not port_open:
+        while True:
             # Get random port number within low and high.
             port = util.System.randint(low, high)
             try:
                 # Attempt to bind to port.
-                s.bind((HOST, port))
-                port_open = True
-                log(f'Binding data connection to: {HOST}:{port}.', self)
+                self.data_conn.conn.bind(('', port))
+                log(f'Binding data connection to: localhost:{port}.', self)
+                break
             except:
                 pass
 
         # Create and start new thread to serve the client on data connection.
-        t = threading.Thread(target=self.serve_data_conn, args=(s,))
+        t = threading.Thread(target=self.data_conn.listen)
         t.start()
 
         return port
 
-    def serve_data_conn(self, sock):
-        '''serve_data_conn(sock)
-        '''
+    def initialize_data_conn(self, conn=None, addr=None, net_prt=None, is_active_mode=False):
+        '''initialize_data_conn(addr, conn=None, net_prt=None)
+        Initialize a new DataConnection object with given host address.'''
 
-        sock.listen()
-        # TODO: can I remove this while loop since only accepting single data conn?
-        while True:
-            try:
-                # Accept new client data connection.
-                conn, addr = sock.accept()
-                if conn:
-                    # Create new data connection object.
-                    self.data_conn = DataConnection(conn, addr)
-                    add_connection(self.data_conn)
-                    self.data_conn.connected = True
-                    log('Connected to client on data channel.', self.data_conn)
-                    break
+        # Get address family.
+        addr_fam = self.determine_addr_fam(net_prt)
 
-            except KeyboardInterrupt:
-                break
+        # Test if no connection given.
+        if not conn:
+            conn = socket.socket(addr_fam, socket.SOCK_STREAM)
+
+        # Create new data connection object.
+        self.data_conn = DataConnection(conn, addr, is_active_mode)
 
 
 class DataConnection:
 
-    def __init__(self, conn, addr):
+    def __init__(self, conn=None, addr=None, is_active_mode=False):
         self.conn = conn
-        self.addr = addr[0]
-        self.port = addr[1]
-        self.connected = False
-        self.data_sent = False
-
-    def addr_info(self):
-        return f'{self.addr}:{self.port}'
-
-    def sendall(self, msg):
-        self.conn.sendall(util.System.encode(msg))
-
-    def ls(self, path):
-        # Get list information.
-        file_list = util.File.listdir(path)
-
-        # Send to client.
-        self.sendall(file_list)
-        self.data_sent = True
-        log(f'Sent LIST data to client', self)
-
-        # Remove connection from list of open connections.
-        remove_connection(self)
-        self.close()
+        self.addr = addr[0] if addr else None
+        self.port = int(addr[1]) if addr else None
+        self.connected = threading.Event()
+        self.is_active_mode = is_active_mode
 
     def close(self):
+        '''close()
+        Close the data connection and remove it from the server's list of open
+        connections.'''
+
         try:
             self.conn.close()
             log('Closed data connection.', self)
         except:
             pass
 
-    # def listen(self):
-    #     '''listen()
-    #     Listen for client to connect to this data connection.'''
+        # Remove connection from list of open connections.
+        remove_connection(self)
 
-    #     self.conn.listen()
-    #     while True:
-    #         conn = None
-    #         try:
-    #             # Accept new client data connection.
-    #             conn, addr = self.conn.accept()
-    #             if conn:
-    #                 # Add self to list of open connections.
-    #                 add_connection(self)
-    #                 self.connected = True
-    #                 log('Connected to client on data channel.', self)
+    def connect(self):
+        '''connect()
+        Connect data connection to host, add itself to server's list of open
+        connection, and set the "connected" event.'''
 
-    #         except KeyboardInterrupt:
-    #             break
+        print(f'connecting to {self.addr}:{self.port}')
+        self.conn.connect((self.addr, self.port))
+
+        # Add data connection to server's list of open connections.
+        add_connection(self)
+
+        # Set "connected" event.
+        self.connected.set()
+
+    def listen(self):
+        '''listen()
+        The data connection listens for a client to connect. This function is to
+        be called when a client selects Passive Mode to be used.'''
+
+        self.conn.listen(1)
+        try:
+            # Accept new client data connection.
+            conn, addr = self.conn.accept()
+
+            # Overwrite Data Connection attributes.
+            self.conn = conn
+            self.addr = addr[0]
+            self.port = int(addr[1])
+
+            # Set "connected" event.
+            self.connected.set()
+            log('Connected to passive data channel.', self)
+
+        except KeyboardInterrupt:
+            pass
+
+    def addr_info(self):
+        '''addr_info()
+        Return the client address information.'''
+
+        return f'{self.addr}:{self.port}'
+
+    def sendall(self, msg):
+        '''sendall(msg)
+        Send all data to client over data connection.'''
+
+        self.conn.sendall(util.System.encode(msg))
+
+    def recvall(self, bufsize=4096):
+        '''recvall(bufsize=4096) -> response data
+        Receive, decode, and return all response data over data connection.'''
+
+        data = b''
+        while True:
+            # Receive some data.
+            res = self.conn.recv(bufsize)
+            print(f'received {len(res)} bytes')
+            data += res
+
+            # Test if end of message.
+            if len(res) < bufsize:
+                break
+
+        return util.System.decode(data)
+
+    def ls(self, path):
+        '''ls(path)
+        Send directory list information to client.'''
+
+        # Get list information.
+        file_list = util.File.listdir(path)
+
+        # Send to client.
+        self.sendall(file_list)
+        log(f'Sent LIST data to client.', self)
+
+    def stor(self, path):
+        '''stor(path)
+        Retrieve file from client and store on file system.'''
+
+        # Receive all file data.
+        f_data = self.recvall(8192)
+
+        log(f'Storing file "{path}" from client.', self)
+        with open(path, 'w') as f:
+            f.write(f_data)
+
+        log(f'Stored file "{path}" from client OK.', self)
+
+    def retr(self, path):
+        '''retr(path)
+        Send a file to the client over data connection.'''
+
+        # Read the file.
+        log(f'Reading file "{path}".', self)
+        with open(path, 'r') as f:
+            text = f.read()
+
+        log(f'Done reading file "{path}".', self)
+
+        self.sendall(text)
+        log(f'Sent file "{path}" to client over data connection.', self)
 
 
 class State:
@@ -526,9 +832,10 @@ class State:
         return f'{self.code} {self.message}\r\n'
 
     def set_reply(self, code, message):
-        '''reply(code, message)
+        '''set_reply(code, message)
         Sets the reply code and message.'''
-        
+
+        print(f'set_reply({code}, {message})')
         self.code = code
         self.message = message
 
