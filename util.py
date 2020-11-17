@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-# CS472 - Homework #3
+# CS472 - Homework #4
 # Edward Parrish
 # util.py
 #
 # This module is the utility module of the FTP server. It provides helper
-# classes for the major module.
+# functions for the major module.
 
 import sys
 import os
 import stat
 import random
+import platform
 
 
 class System:
@@ -18,7 +19,7 @@ class System:
 
     @staticmethod
     def args(port_min, port_max):
-        '''args() -> (filename, port number)
+        '''args() -> (log filename, port number)
         Retrieve the command line arguments for the FTP server. Handles
         potential errors with the FTP server command line arguments. If errors
         exist then the program exits.'''
@@ -85,6 +86,81 @@ class System:
     def randint(a, b):
         return random.randint(a, b)
 
+    @staticmethod
+    def system_info():
+        return f'{platform.system()} {platform.release()}'
+
+    @staticmethod
+    def config():
+        '''config() -> configuration tuple
+        Read the config file at the hardcoded path "./home/elp49/ftpserver.conf"
+        and return the configuration settings.'''
+
+        config = Config()
+        path = './home/elp49/ftpserverd.conf'
+
+        try:
+            f = open(path, mode='r')
+        except:
+            return config
+
+        line = f.readline().strip()
+        while line:
+            if line[0] != Config.COMMENT:
+                a = line.split(Config.OPERATOR)
+                if len(a) > 1:
+                    attribute = a[0].strip()
+                    value = a[1].strip().split(Config.COMMENT)[0].strip()
+                    if attribute and value:
+                        config.set_attribute(attribute, value)
+
+            line = f.readline().strip()
+
+        f.close()
+        return config
+
+
+class Config:
+
+    COMMENT = '#'
+    OPERATOR = '='
+    PORT_MODE = 'port_mode'
+    PASV_MODE = 'pasv_mode'
+    ATTRIBUTES = [PORT_MODE, PASV_MODE]
+
+    YES = 'yes'
+    NO = 'no'
+    VALUES = [YES, NO]
+
+    def __init__(self, port_mode=True, pasv_mode=True):
+        self.port_mode = port_mode
+        self.pasv_mode = pasv_mode
+
+    def set_attribute(self, attribute, value):
+        a = attribute.lower()
+        v = value.lower()
+        if a in Config.ATTRIBUTES and v in Config.VALUES:
+            if a == Config.PORT_MODE:
+                if v == Config.YES:
+                    self.port_mode = True
+                elif v == Config.NO:
+                    self.port_mode = False
+
+            elif a == Config.PASV_MODE:
+                if v == Config.YES:
+                    self.pasv_mode = True
+                elif v == Config.NO:
+                    self.pasv_mode = False
+
+    def all_data_conn_types_disabled(self):
+        '''all_data_conn_types_disabled() -> boolean
+        Test if all data connection types are disabled.'''
+        
+        if self.port_mode or self.pasv_mode:
+            return False
+
+        return True
+
 
 class File:
     '''File
@@ -103,7 +179,7 @@ class File:
         # Test if home dir does not exist.
         if not os.path.exists(HOME):
             os.mkdir(HOME)
-            
+
         # Get absolute path to user directory.
         path = File.realpath(HOME, user)
 
